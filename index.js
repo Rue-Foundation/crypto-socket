@@ -1,4 +1,4 @@
-/* jshint asi: true, node: true, esversion: 6, unused: true */
+/* jshint asi: true, node: true, esversion: 6, undef: true, unused: true */
 
 /*
     Crypto-socket
@@ -32,7 +32,7 @@ exports.Exchanges = Exchanges
     only this variable will need to be changed to support any market.
 */
 
-ExchangeInfo = {
+var ExchangeInfo = {
     'bittrex': {
         'USD': [
             'BTC', 'ETH', 'NEO',
@@ -81,6 +81,28 @@ exports.echoExchange = function() {
     }
     //console.log(Exchanges)
 }
+
+var status = function(exchange, event, status) {
+  if (typeof status === 'undefined') status = {}
+  else if  (typeof status === 'string') status = { diagnostic: status }
+
+  console.log(exchange + ' ' + event + ': ' + JSON.stringify(status))
+}
+exports.status = status
+
+var update = function(exchange, symbol, value) {
+  if (typeof Exchanges[exchange] === 'undefined') Exchanges[exchange] = {}
+  if (Exchanges[exchange][symbol] === value) return
+
+  Exchanges[exchange][symbol] = value
+
+//  console.log({ exchange: exchange, symbol: symbol, value: Exchanges[exchange][symbol] })
+}
+setInterval(() => { console.log(JSON.stringify(Exchanges, null, 2)) }, 30 * 1000)
+exports.update = update
+
+exports.debugP = false
+
 exports.start = function(exchange, symbols) {
     if (typeof exchange == "undefined") {
         cryptoSockets.start()
@@ -109,12 +131,12 @@ var getExchangeSymbols = function(exchange) {
 }
 exports.getExchangeSymbols = getExchangeSymbols
 var assembleSymbols = function(exchange) {
-  supportedSymbols = []
+  var supportedSymbols = []
   var filter = function(main) {
       var symbol = ''
       var sub = ''
       if (exchange == 'bitfinex' && key == 'BCC') {
-          sub = BCC
+          sub = 'BCC'
       } else {
           sub = key
       }
@@ -135,9 +157,8 @@ var assembleSymbols = function(exchange) {
 exports.supportedExchanges = supportedExchanges
 
 var cryptoSockets = {
-
     'bittrex': function(symbols) {
-        console.log(symbols)
+        if (exports.debugP) console.log(symbols)
         if (typeof symbols == 'undefined') {
             // default it
             symbols = ['BTCUSD']
@@ -152,7 +173,7 @@ var cryptoSockets = {
                 return 'USDT-BTC'
             } else {
                 pairs.filter(function(p) {
-                    console.log(p)
+                    if (exports.debugP) console.log(p)
                     if (sym.endsWith(p) && symbol == '') {
                         symbol = p + (p == 'USD' ? 'T' : '') + '-' + sym.split(p)[0]
                     }
@@ -162,11 +183,8 @@ var cryptoSockets = {
             if (typeof symbol != 'undefined' && symbol != '') {
                 return symbol
             } else {
-                console.log("Could not convert bittrex symbol, market not found.")
+              status('bittrex', 'error', { symbol: sym, diagnostic: 'market not found' })
             }
-        }
-        if (typeof Exchanges.bittrex == "undefined") {
-            Exchanges.bittrex = {}
         }
         if (typeof symbols != 'undefined') {
             // check exchanges to see that quote is not 
@@ -185,8 +203,7 @@ var cryptoSockets = {
                     // cant believe this crap. the only way to avoid 'null' errors
                     // if market was invalid etc.
                     if (typeof responseObj != 'undefined' && responseObj != null && responseObj && typeof responseObj.Last == 'number') {
-                        Exchanges.bittrex[sym] = parseFloat(responseObj.Last)
-
+                        update('bittrex', parseFloat(responseObj.Last))
                     }
                     //}
                 })
@@ -204,15 +221,14 @@ var cryptoSockets = {
         }
     },
     'bitfinex': function(symbols) {
-        console.log("bitfinex start")
         // walk through exchange info to build list of supported symbols
-        var activeSymbols = []
+      var activeSymbols = []
       var supportedSymbols = ['BTCUSD']
       var supported = function(main) {
           var symbol = ''
           var sub = ''
           if (key == 'BCC') {
-              sub = BCC
+              sub = 'BCC'
           } else {
               sub = key
           }
@@ -224,8 +240,7 @@ var cryptoSockets = {
           supportedSymbols.push(symbol)
       }
         for (var key in ExchangeInfo.bitfinex) {
-            ExchangeInfo.bitfinex[key].filter(supported)
-          
+            ExchangeInfo.bitfinex[key].filter(supported)          
         }
         if (typeof symbols == 'undefined') {
             activeSymbols.push({
@@ -234,7 +249,7 @@ var cryptoSockets = {
                 "pair": 'BTCUSD'
             })
         } else {
-            if (symbols == 'string') {
+            if (typeof symbols == 'string') {
                 if (parseInt(supportedSymbols.indexOf(symbols)) > -1) {
                     activeSymbols.push({
                         "event": "subscribe",
@@ -244,16 +259,15 @@ var cryptoSockets = {
                 }
             } else if (symbols.length > 0) {
                 symbols.filter(function(s) {
-                    console.log(s)
-                        if (parseInt(supportedSymbols.indexOf(s)) > -1) {
-                            activeSymbols.push({
-                                "event": "subscribe",
-                                "channel": "ticker",
-                                "pair": s
-                            })
-                        }           
+                    if (exports.debugP) console.log(s)
+                    if (parseInt(supportedSymbols.indexOf(s)) > -1) {
+                        activeSymbols.push({
+                            "event": "subscribe",
+                            "channel": "ticker",
+                            "pair": s
+                        })
                     }
-                )
+                })
             }
         }
         // probably had to make this self because of the filter function
@@ -287,8 +301,8 @@ var cryptoSockets = {
                         //force string
                         tickerCode = BfxChannelIds[data[0] + '']
 
-                        if (tickerCode && tickerValue != Exchanges.bitfinex[tickerCode]) {
-                            Exchanges.bitfinex[tickerCode] = tickerValue
+                        if (tickerCode) {
+                            update('bitfinex', tickerCode, tickerValue)
                         }
                     }
                 }
@@ -298,7 +312,6 @@ var cryptoSockets = {
         return true
     },
     'bitmex': function(symbol) {
-        console.log("starting bitmex")
         // to support more bitmex symbols check out their rest API and implement symbols you see from
         // the return of their endpoints
         var symbols = {
@@ -306,16 +319,27 @@ var cryptoSockets = {
             "XBTUSD": 'BTCUSD',
             ".LTCXBT": "LTCBTC"
         }
-        var query = Object.keys(symbols)
-            .filter((key) => {
-                if (symbol) {
-                    return symbols[key] == symbol
-                } else {
-                    return true
-                }
+        var query
+        if ((typeof symbol === 'undefined') || (typeof symbol === 'string')) {
+            query = Object.keys(symbols)
+                .filter((key) => {
+                    if (symbol) {
+                        return symbols[key] == symbol
+                    } else {
+                        return true
+                    }
+                })
+                .map((symbol) => { return 'trade:' + symbol })
+                .join(',')
+        } else {
+            query = []
+            symbol.forEach((sym) => {
+                Object.keys(symbols).filter((key) => { return symbols[key] === sym }).map((key) => {
+                  query.push( 'trade:' + key)
+                })
             })
-            .map((symbol) => { return 'trade:' + symbol })
-            .join(',')
+            query = query.join(',')
+        }
         this.makeSocket('wss://www.bitmex.com/realtime?subscribe=' + query, 'bitmex', function(event) {
             if (typeof event.data != "undefined") {
                 var data = JSON.parse(event.data)
@@ -326,77 +350,82 @@ var cryptoSockets = {
                         return false
                     }
                     if (symbols[data.symbol]) {
-                        Exchanges.bitmex[symbols[data.symbol]] = parseFloat(data.price)
+                        update('bitmex', symbols[data.symbol], parseFloat(data.price))
                     }
                 } else {
-                    //console.log(event)
-                    console.log(JSON.parse(event.data))
-                    console.log("Issue with bitmex response")
+                    if ((data.success === true) || (data.info)) return
+
                     // close the socket?
+                    status('bitmex', 'error', "Issue with bitmex response: " + JSON.stringify(data))
                 }
             }
         })
         return true
     },
-    'bitstamp': function(symbol) {
+    'bitstamp': function(symbols) {
         if (typeof Pusher != "undefined") {
-            var pusher
+            var pusher, matchP
             try {
                 pusher = new Pusher('de504dc5763aeef9ff52', {})
-                if (typeof Exchanges.bitstamp == "undefined") {
-                    Exchanges.bitstamp = {}
-                }
             } catch (error) {
-                console.log("startBitstampSocket error:\t:**")
-                console.log(error)
+                status('bitstamp', 'error', error.toString())
                 return false
             }
-            console.log("starting bistamp socket")
-            if (typeof symbol == "undefined") {
-                // dont forget to filter to only data u want.
-                BitstampSocket = pusher.subscribe('live_trades')
-                BitstampSocket.bind('trade', function(data) {
-                    var price = parseFloat(data.price)
-                    if (Exchanges.bitstamp.BTCUSD != price) {
-                        Exchanges.bitstamp.BTCUSD = parseFloat(data.price)
-                    }
-                })
-                BitstampSocket2 = pusher.subscribe('live_trades_xrpbtc')
-                BitstampSocket2.bind('trade', function(data) {
-                    var price = parseFloat(data.price)
-                    if (Exchanges.bitstamp.XRPBTC != price) {
-                        Exchanges.bitstamp.XRPBTC = parseFloat(data.price)
-                    }
-                })
-            } else {
-/*
-                // check supported symbol pairs
-                var symbolConversion = {
-                    'XRPBTC': 'live_trades_xrpbtc'
-                }
- */
+            if ((typeof symbols === 'undefined') || (symbols.length === 0)) {
+              symbols = [ 'BTCUSD', 'ETHBTC' ]
+            } else if (typeof symbols === 'string') {
+              symbols = [ symbols ]
             }
-            return true
+
+            symbols.forEach((symbol) => {
+                var suffix = symbol.toLowerCase()
+                if ([ 'btceur',
+                      'btcusd',
+                      'ethbtc',
+                      'etheur',
+                      'ethusd',
+                      'eurusd',
+                      'ltcbtc',
+                      'ltceur',
+                      'ltcusd',
+                      'xrpbtc',
+                      'xrpeur',
+                      'xrpusd',
+                    ].indexOf(suffix) === -1) return
+                matchP = true
+
+                var BitstampSocket = pusher.subscribe('live_trades_' + suffix)
+                try {
+                  BitstampSocket.bind('trade', function(data) {
+                      update('bitstamp', symbol, parseFloat(data.price))
+                  })
+                  status('bitstamp', 'open', { symbol: symbol })
+                } catch (ex) {
+                  status('bitstamp', 'error', { symbol: symbol, diagnostic: ex.toString() })
+                }
+            })
+            return (matchP || false)
         } else {
-            console.log("No pusher")
+            status('bitstamp', 'error', 'no pusher')
             return false
         }
     },
-    'cex': function(symbol) {
+    'cex': function(symbols) {
+        if ((typeof symbols === 'undefined') || (symbols.length === 0)) {
+          symbols = [ 'BTCUSD', 'ETHBTC' ]
+        } else if (typeof symbols === 'string') {
+          symbols = [ symbols ]
+        }
         this.makeSocket('wss://ws.cex.io/ws/', 'cex', function(event) {
             if (typeof event.data != "undefined") {
                 var data = JSON.parse(event.data)
+                var tickerCode = data.symbol1 + data.symbol2
+              
                 if (data && typeof data.data != "undefined") {
                     data = data.data
-                    var tickerValue = parseFloat(data.price)
-                    if ((data.symbol1 == 'BTC' && data.symbol2 == 'USD') || (data.symbol1 == 'ETH' && data.symbol2 == 'BTC')) {
-                        var tickerCode = data.symbol1 + data.symbol2
-                        if (typeof symbol == "string" && tickerCode != symbol) {
-                            return false
-                        }
-                        if (tickerValue != Exchanges.cex[tickerCode]) {
-                            Exchanges.cex[tickerCode] = tickerValue
-                        }
+                    tickerCode = data.symbol1 + data.symbol2
+                    if (symbols.indexOf(tickerCode) !== -1) {
+                        update('cex', tickerCode, parseFloat(data.price))
                     }
                 }
             }
@@ -410,33 +439,54 @@ var cryptoSockets = {
     },
     'gdax': function(symbol) {
         var norm = (symbol) => { return symbol.replace('-', '') }
-        var query = [{
-                "type": "subscribe",
-                "product_id": "BTC-USD"
-            }, {
-                "type": "subscribe",
-                "product_id": "ETH-BTC"
-            },
-            {
-                "type": "subscribe",
-                "product_id": "LTC-BTC"
-            }
-        ].filter((item) => {
-            return typeof symbol == 'undefined' || norm(item.product_id) == symbol
-        })
+        var query
+        if ((typeof symbol === 'undefined') || (typeof symbol === 'string')) {
+            query = [{
+                    "type": "subscribe",
+                    "product_id": "BTC-USD"
+                }, {
+                    "type": "subscribe",
+                    "product_id": "ETH-BTC"
+                },
+                {
+                    "type": "subscribe",
+                    "product_id": "LTC-BTC"
+                }
+            ].filter((item) => {
+                return typeof symbol == 'undefined' || norm(item.product_id) == symbol
+            })
+        } else {
+          query = []
+          symbol.forEach((sym) => {
+            query.push({ type: 'subscribe', product_id: sym.substr(0,3) + '-' + sym.substr(3) })
+          })
+        }
         this.makeSocket('wss://ws-feed.gdax.com/', 'gdax', function(event) {
             if (typeof event.data != "undefined") {
                 var data = JSON.parse(event.data)
-                if (data && typeof data.type != "undefined") {
-                    var tickerValue = parseFloat(data.price)
-                    if (tickerValue != Exchanges.gdax[norm(data.product_id)]) {
-                        Exchanges.gdax[norm(data.product_id)] = tickerValue
-                    }
+                if ((data) && (typeof data.type != "undefined") && (data.price)) {
+                    update('gdax', norm(data.product_id), parseFloat(data.price))
                 }
             }
         }, query)
     },
     'gemini': function(symbol) {
+        if ((typeof symbol === 'object') && (symbol instanceof Array)) {
+            symbol.forEach((sym) => {
+                this.makeSocket('wss://api.gemini.com/v1/marketdata/' + sym.toLowerCase(), 'gemini', function(event) {
+                    if (typeof event.data != "undefined") {
+                        var data = JSON.parse(event.data)
+                        if (data && typeof data.events != "undefined") {
+                            data = data.events[0]
+                            if (data.type == "trade") {
+                                update('gemini', sym, parseFloat(data.price))
+                            }
+                        }
+                    }
+                })
+            })
+            return true
+        }
         if (typeof symbol != "undefined" && symbol == 'ETHBTC') {
         } else {
             this.makeSocket('wss://api.gemini.com/v1/marketdata/btcusd', 'gemini', function(event) {
@@ -445,33 +495,26 @@ var cryptoSockets = {
                     if (data && typeof data.events != "undefined") {
                         data = data.events[0]
                         if (data.type == "trade") {
-                            if (typeof Exchanges.gemini == "undefined") {
-                                Exchanges.gemini = {}
-                            }
-                            var tickerValue = parseFloat(data.price)
-                            Exchanges.gemini.BTCUSD = tickerValue
-
+                            update('gemini', 'BTCUSD', parseFloat(data.price))
                         }
                     }
                 }
             })
         }
-        this.makeSocket('wss://api.gemini.com/v1/marketdata/ethbtc', 'gemini2', function(event) {
-            if (typeof event.data != "undefined") {
-                var data = JSON.parse(event.data)
-                if (data && typeof data.events != "undefined") {
-                    data = data.events[0]
-                    if (data.type == "trade") {
-                        var tickerValue = parseFloat(data.price)
-                        if (typeof Exchanges.gemini == "undefined") {
-                            Exchanges.gemini = {}
+        if (typeof symbol != "undefined" && symbol == 'BTCUSD') {
+        } else {
+            this.makeSocket('wss://api.gemini.com/v1/marketdata/ethbtc', 'gemini2', function(event) {
+                if (typeof event.data != "undefined") {
+                    var data = JSON.parse(event.data)
+                    if (data && typeof data.events != "undefined") {
+                        data = data.events[0]
+                        if (data.type == "trade") {
+                            update('gemini', 'ETHBTC', parseFloat(data.price))
                         }
-                        Exchanges.gemini.ETHBTC = tickerValue
-
                     }
                 }
-            }
-        })
+            })
+        }
         return true
     },
     'okcoin': function(symbol) {
@@ -498,14 +541,13 @@ var cryptoSockets = {
         } else if (typeof symbol == "string" && symbol == "BTCUSD") {
             query.pop()
         }
-        console.log("Start okcSocket")
         this.makeSocket('wss://real.okcoin.com:10440/websocket/okcoinapi', 'okcoin', function(event) {
             var data = JSON.parse(event.data)
             if (data) {
                 data = data[0]
             } else {
-                console.log(event)
-                console.log("Issue with server response")
+                status('okcoin', 'error',  "Issue with okcoin response: " + JSON.stringify(event))
+                return false
             }
             if (typeof data.data == "undefined") {
                 // nothing to process
@@ -513,7 +555,6 @@ var cryptoSockets = {
             }
             if (typeof data != "undefined" && typeof data.channel != "undefined") {
                 var tickerCode
-                var tickerValue
                 if (data.channel == "ok_ltcusd_ticker") {
                     tickerCode = "LTCUSD"
                 } else if (data.channel == "ok_btcusd_ticker") {
@@ -522,12 +563,7 @@ var cryptoSockets = {
                 data = data.data.last
                 var floatCheck = parseFloat(data)
                 if (floatCheck && floatCheck > 0) {
-                    tickerValue = floatCheck
-                }
-                if (tickerValue) {
-                    if (tickerValue != Exchanges.okcoin[tickerCode]) {
-                        Exchanges.okcoin[tickerCode] = tickerValue
-                    }
+                    update('okcoin', tickerCode, floatCheck)
                 }
             }
         }, query)
@@ -541,11 +577,9 @@ var cryptoSockets = {
             url: wsuri,
             realm: "realm1"
         })
-        if (typeof Exchanges.poloniex == "undefined") {
-            Exchanges.poloniex = {}
-        }
         try {
             Sockets.poloniex.onopen = function(session) { /* jshint unused: false */
+                status('poloniex', 'open')
                 session.subscribe('ticker', function(args, kwargs) {
                     var codeConversion = {
                         "BTC_ETH": "ETHBTC",
@@ -573,101 +607,118 @@ var cryptoSockets = {
                         "BTC_XRP": "XRPBTC"
                     }
                     var tickerCode = (typeof codeConversion[args[0]] != "undefined" ? codeConversion[args[0]] : false)
+                    if (!tickerCode) return
 
-                    if ((tickerCode != symbol && typeof symbol != "undefined") || !tickerCode) {
-                        return false
+                    if ((typeof symbol === 'object') && (symbol instanceof Array)) {
+                      if (symbol.indexOf(tickerCode) === -1) return
+                    } else if ((tickerCode != symbol && typeof symbol != "undefined")) {
+                        return
                     }
-                    tickerValue = parseFloat(args[1])
-
-                    if (Exchanges.poloniex[tickerCode] != tickerValue) {
-                        Exchanges.poloniex[tickerCode] = tickerValue
-                    }
+                    update('poloniex', tickerCode, parseFloat(args[1]))
                 })
             }
         } catch (error) {
-            console.log(error)
+            status('poloniex', 'error', error.toString())
         }
 
         Sockets.poloniex.onclose = function() {
-            console.log("Polosocket connection closed")
+            status('poloniex', 'close')
         }
         Sockets.poloniex.open()
     },
     makeSocket: function(url, title, onMessage, send) {
+        var params, socket
+
         if (typeof url != "string" || typeof title != "string") {
             return false
         }
-        if (typeof Sockets[title] == "undefined" || !Sockets[title]) {
-            Sockets[title] = {}
+        if (typeof Sockets[title] === "undefined") {
+          Sockets[title] = []
         }
-        Sockets[title] = new WebSocket.Client(url)
+        socket = new WebSocket.Client(url)
+        Sockets[title].push(socket)
+        params = {}
+        if (typeof send !== 'undefined') {
+            if (typeof send === 'string') {
+                params = { symbol: send }
+            } else if (send.pair) {
+                params = { symbol: send.pair }            
+            }
+        }
+        var loser = function (reason) {
+            params.diagnostic = reason
+            status(title, 'error', params)
+            return false
+         }
 
         try { /* jshint unused: false */
-            Sockets[title].on('open', function(event) {
-                console.log(title + ' open')
-                if (typeof Exchanges[title] == "undefined" && title != "gemini2") {
-                    Exchanges[title] = {}
-                }
+            socket.on('open', function(event) {
+              status(title, 'open', params)
             })
         } catch (error) {
-            console.log(error)
-            return false
-
+            return loser(error.toString())
         }
         try {
-            Sockets[title].on('close', function(event) {
-                console.log(title + ' close')
+            socket.on('close', function(event) {
+                params.diagnostic = (event) && (event.code !== 1000) && (event.reason)
+                status(title, 'close', params)
             })
         } catch (error) {
-            console.log(error)
-            return false
+            return loser(error.toString())
         }
         if (typeof onMessage == "function") {
-            Sockets[title].on('message', onMessage)
+            socket.on('message', onMessage)
         }
         if (typeof send == "object" && !(send instanceof Array)) {
             // parse an object to send ?
             try {
-                Sockets[title].send(JSON.stringify(send))
+                socket.send(JSON.stringify(send))
             } catch (error) {
-                console.log(error)
-                return false
+                return loser(error.toString())
             }
         } else if (typeof send != "undefined" && send instanceof Array) {
             send.filter(function(o) {
-                Sockets[title].send(JSON.stringify(o))
+                socket.send(JSON.stringify(o))
             })
         } else if (typeof send != "undefined") {
             try {
-                Sockets[title].send(JSON.stringify(send))
+                socket.send(JSON.stringify(send))
             } catch (error) {
-                console.log(error)
-                return false
+                return loser(error.toString())
             }
         }
         return true
     },
     'start': function(exchange, symbols) {
-        if (typeof exchange == "undefined") {
-            var self = this
+        var self = this
 
+        if (typeof exchange == "undefined") {
             supportedExchanges.filter(function(e) {
-                console.log(e)
+                if (exports.debugP) console.log(e)
                 self[e](symbols)
             })
         } else {
-            try {
-                this[exchange](symbols)
-            } catch (error) {
-                console.log(exchange)
-                console.log(error)
-            }
+            var exchanges = exchange
+
+            if (typeof exchanges === 'string') exchanges = [ exchanges ]
+            exchanges.filter(function(exchange) {
+                try {
+                    self[exchange](symbols)
+                } catch (error) {
+                    status(exchange, 'error', { symbols: symbols, diagnostic:  error.toString() })
+                }
+            })
         }
     },
     'stop': function(socket) {
         // only for the faye socket libraries?
         if (typeof Sockets[socket] != "undefined") {
-            Sockets[socket].close()
+          if (Sockets[socket] instanceof Array) {
+              Sockets[socket].forEach((socket) => { socket.close() })
+            } else {
+                Sockets[socket].close()
+            }
+            Sockets[socket] = undefined
             return true
         }
         return false
