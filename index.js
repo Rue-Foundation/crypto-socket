@@ -98,7 +98,7 @@ var update = function(exchange, symbol, value) {
 
 //  console.log({ exchange: exchange, symbol: symbol, value: Exchanges[exchange][symbol] })
 }
-setInterval(() => { console.log(JSON.stringify(Exchanges, null, 2)) }, 30 * 1000)
+setInterval(() => { console.log(JSON.stringify(Exchanges, null, 2)) }, 5 * 60 * 1000)
 exports.update = update
 
 exports.debugP = false
